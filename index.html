@@ -2,40 +2,41 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Vocaloid Mansion 3D</title>
+    <title>Vocaloid Mansion 3D: Escape!</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
         body { margin: 0; overflow: hidden; background: #87CEEB; font-family: sans-serif; }
         #ui { position: absolute; top: 10px; left: 10px; color: white; text-shadow: 1px 1px #000; z-index: 10; display: none; }
-        #stamina-bar { width: 150px; height: 10px; background: rgba(0,0,0,0.5); border: 1px solid #fff; }
+        #stamina-bar { width: 150px; height: 10px; background: rgba(0,0,0,0.5); border: 1px solid #fff; margin-top: 5px; }
         #stamina-fill { width: 100%; height: 100%; background: #00ffcc; }
+        
         .controls { position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: space-between; padding: 0 20px; box-sizing: border-box; z-index: 20; display: none; pointer-events: none; }
-        .btn { width: 75px; height: 75px; background: rgba(255,255,255,0.5); border: 2px solid #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; pointer-events: auto; font-weight: bold; }
+        .btn { width: 75px; height: 75px; background: rgba(255,255,255,0.5); border: 2px solid #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; pointer-events: auto; font-weight: bold; user-select: none; }
         #joy { width: 110px; height: 110px; background: rgba(255,255,255,0.2); border-radius: 50%; border: 3px solid #ff66b2; pointer-events: auto; }
         
-        /* Menú de Selección de Vocaloids */
+        #cam-zone { position: absolute; top: 0; right: 0; width: 60%; height: 60%; z-index: 5; pointer-events: auto; }
         #menu { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #ffcce6; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; text-align: center; }
-        .skin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; }
-        .skin-btn { padding: 15px; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 16px; color: white; }
+        .skin-btn { padding: 15px; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; color: white; margin: 5px; width: 120px; }
     </style>
 </head>
 <body>
 
 <div id="menu">
-    <h1 style="color:#ff66b2; margin:0;">VOCALOID MANSION</h1>
-    <p>Elige tu personaje para buscar Baguettes:</p>
-    <div class="skin-grid">
-        <button class="skin-btn" style="background:#ff66b2" onclick="start(0xff66b2, 'Teto')">🥖 TETO</button>
-        <button class="skin-btn" style="background:#33ffcc; color:#000" onclick="start(0x33ffcc, 'Miku')">🩵 MIKU</button>
-        <button class="skin-btn" style="background:#ffff00; color:#000" onclick="start(0xffff00, 'Rin')">💛 RIN</button>
-        <button class="skin-btn" style="background:#3366ff" onclick="start(0x3366ff, 'Kaito')">💙 KAITO</button>
+    <h1 style="color:#ff66b2;">VOCALOID MANSION 3D</h1>
+    <p>¡Las baguettes ahora escapan! <br> Desliza arriba a la derecha para girar cámara.</p>
+    <div style="display: flex; flex-wrap: wrap; justify-content: center;">
+        <button class="skin-btn" style="background:#ff66b2" onclick="start(0xff66b2, 'Teto')">TETO</button>
+        <button class="skin-btn" style="background:#33ffcc; color:#000" onclick="start(0x33ffcc, 'Miku')">MIKU</button>
+        <button class="skin-btn" style="background:#ffff00; color:#000" onclick="start(0xffff00, 'Rin')">RIN</button>
+        <button class="skin-btn" style="background:#3366ff" onclick="start(0x3366ff, 'Kaito')">KAITO</button>
     </div>
 </div>
 
+<div id="cam-zone"></div>
+
 <div id="ui">
-    <h3 style="margin:0">Encontradas: <span id="score">0</span> / 10</h3>
+    <h3 style="margin:0">Baguettes: <span id="score">0</span> / 10</h3>
     <div id="stamina-bar"><div id="stamina-fill"></div></div>
-    <small id="char-name"></small>
 </div>
 
 <div class="controls" id="game-controls">
@@ -50,14 +51,14 @@
 
 <script>
     let scene, camera, renderer, player, clock;
-    let baguettes = [], score = 0, stamina = 100, isRunning = false, yVel = 0;
-    let moveX = 0, moveZ = 0;
+    let baguettes = [], walls = [], score = 0, stamina = 100;
+    let isRunning = false, yVel = 0, moveX = 0, moveZ = 0;
+    let camRotation = 0, lastTouchX = 0;
 
     function start(color, name) {
         document.getElementById('menu').style.display = 'none';
         document.getElementById('ui').style.display = 'block';
         document.getElementById('game-controls').style.display = 'flex';
-        document.getElementById('char-name').innerText = "Jugando como: " + name;
         init(color);
     }
 
@@ -73,71 +74,107 @@
 
         scene.add(new THREE.AmbientLight(0xffffff, 1.2));
 
-        // Suelo
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshBasicMaterial({ color: 0x228B22 }));
-        floor.rotation.x = -Math.PI / 2;
-        scene.add(floor);
+        // Suelo con textura de rejilla para notar el movimiento
+        const floorGeo = new THREE.PlaneGeometry(100, 100, 20, 20);
+        const floorMat = new THREE.MeshBasicMaterial({ color: 0x228B22, wireframe: true });
+        const floorBase = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshBasicMaterial({color: 0x1a6b1a}));
+        floorBase.rotation.x = -Math.PI / 2;
+        scene.add(floorBase);
 
-        // Paredes
+        // Muros y Habitaciones (Mansión Detallada)
         const wallMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-        function box(w, h, d, x, z) {
+        function addWall(w, h, d, x, z) {
             const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
             m.position.set(x, h/2, z);
             scene.add(m);
+            walls.push(m);
         }
-        box(60, 5, 1, 0, -30); box(60, 5, 1, 0, 30); box(1, 5, 60, -30, 0); box(1, 5, 60, 30, 0);
+        // Perímetro
+        addWall(80, 6, 2, 0, -40); addWall(80, 6, 2, 0, 40);
+        addWall(2, 6, 80, -40, 0); addWall(2, 6, 80, 40, 0);
+        // Habitaciones Interiores
+        addWall(30, 6, 2, -25, 10); addWall(2, 6, 30, 10, -25);
+        addWall(15, 6, 2, 20, -5);  addWall(2, 6, 15, -10, 20);
 
-        // Jugador (Vocaloid elegido)
+        // Jugador
         player = new THREE.Group();
-        const body = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), new THREE.MeshBasicMaterial({ color: charColor }));
+        const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 1.5, 4, 8), new THREE.MeshBasicMaterial({ color: charColor }));
         body.position.y = 1;
         player.add(body);
         scene.add(player);
 
-        // Baguettes (Bots)
+        // Baguettes Bots que escapan
         for(let i=0; i<10; i++) {
-            const b = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
-            b.position.set((Math.random()-0.5)*50, 0.6, (Math.random()-0.5)*50);
+            const b = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.3, 0.3), new THREE.MeshBasicMaterial({ color: 0xffa500 }));
+            b.position.set((Math.random()-0.5)*70, 0.5, (Math.random()-0.5)*70);
             scene.add(b);
-            baguettes.push(b);
+            baguettes.push({ mesh: b, vel: new THREE.Vector3() });
         }
 
+        // Controles de Cámara (Zona derecha)
+        const camZone = document.getElementById('cam-zone');
+        camZone.ontouchstart = (e) => { lastTouchX = e.touches[0].clientX; };
+        camZone.ontouchmove = (e) => {
+            let deltaX = e.touches[0].clientX - lastTouchX;
+            camRotation -= deltaX * 0.01;
+            lastTouchX = e.touches[0].clientX;
+        };
+
+        // Joystick
         const joy = document.getElementById('joy');
-        joy.addEventListener('touchmove', (e) => {
+        joy.ontouchmove = (e) => {
             const r = joy.getBoundingClientRect();
-            moveX = (e.touches[0].clientX - (r.left + r.width/2)) / 35;
-            moveZ = (e.touches[0].clientY - (r.top + r.height/2)) / 35;
-        });
-        joy.addEventListener('touchend', () => { moveX = 0; moveZ = 0; });
+            moveX = (e.touches[0].clientX - (r.left + r.width/2)) / 30;
+            moveZ = (e.touches[0].clientY - (r.top + r.height/2)) / 30;
+        };
+        joy.ontouchend = () => { moveX = 0; moveZ = 0; };
+
         document.getElementById('run').ontouchstart = () => isRunning = true;
         document.getElementById('run').ontouchend = () => isRunning = false;
-        document.getElementById('jump').ontouchstart = () => { if(player.position.y <= 0.1) yVel = 0.32; };
+        document.getElementById('jump').ontouchstart = () => { if(player.position.y <= 0.1) yVel = 0.35; };
 
         animate();
     }
 
     function animate() {
         requestAnimationFrame(animate);
-        let speed = (isRunning && stamina > 0) ? 0.45 : 0.22;
-        if(isRunning && stamina > 0) stamina -= 0.6; else if(stamina < 100) stamina += 0.3;
+        let speed = (isRunning && stamina > 0) ? 0.5 : 0.25;
+        if(isRunning && stamina > 0) stamina -= 0.7; else if(stamina < 100) stamina += 0.3;
         document.getElementById('stamina-fill').style.width = stamina + "%";
 
-        player.position.x += moveX * speed;
-        player.position.z += moveZ * speed;
+        // Movimiento relativo a la cámara
+        let forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), camRotation);
+        let right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), camRotation);
+        
+        player.position.addScaledVector(forward, -moveZ * speed);
+        player.position.addScaledVector(right, moveX * speed);
+
+        // Gravedad
         player.position.y += yVel;
         if(player.position.y > 0) yVel -= 0.02; else { player.position.y = 0; yVel = 0; }
 
-        camera.position.set(player.position.x, player.position.y + 12, player.position.z + 18);
-        camera.lookAt(player.position);
-
+        // IA de Baguettes (Escapan del jugador)
         baguettes.forEach((b, i) => {
-            if(player.position.distanceTo(b.position) < 1.8) {
-                scene.remove(b);
+            let dist = player.position.distanceTo(b.mesh.position);
+            if(dist < 8) { // Si Teto está cerca, escapan
+                let dir = new THREE.Vector3().subVectors(b.mesh.position, player.position).normalize();
+                b.mesh.position.addScaledVector(dir, 0.15);
+            }
+            b.mesh.rotation.y += 0.05;
+
+            if(dist < 1.8) {
+                scene.remove(b.mesh);
                 baguettes.splice(i, 1);
                 score++;
                 document.getElementById('score').innerText = score;
             }
         });
+
+        // Cámara sigue a Teto y rota
+        let camOffset = new THREE.Vector3(0, 12, 20).applyAxisAngle(new THREE.Vector3(0, 1, 0), camRotation);
+        camera.position.copy(player.position).add(camOffset);
+        camera.lookAt(player.position);
+
         renderer.render(scene, camera);
     }
 </script>
